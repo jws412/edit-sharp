@@ -1,6 +1,7 @@
 #include <stdio.h>
 #include "global_data.h"
 #include "init.h"
+#include "memory_manager.h"
 
 LRESULT editorProcedure(HWND windowHandle, unsigned int messageId, 
     WPARAM primary, LPARAM secondary);
@@ -37,17 +38,16 @@ LRESULT editorProcedure(HWND hWindow,
     static HFONT hLabellingFont = NULL;         // Font for menu items.
     static HFONT hMonospaceFont = NULL;         // Font for code.
     
-    static unsigned int titlebarHeight;         // Titlebar height.
+    static unsigned int titlebarHeight = 0;     // Titlebar height.
     static RECT currentWindowRect = { 0 };      // Current window size.
+    static unsigned int editorWidth = 0, editorHeight = 0;
     static sEditorState editorState = { 0 };    // Target of change.
     
     #define INITIALIZE_TO_LASTEST_HIGHLIGHT_RECTANGLE() {   \
         .left = ES_LAYOUT_LINECOUNT_WIDTH,                  \
         .top = ES_LAYOUT_LINECOUNT_FONT_HEIGHT              \
             *(editorState.relativeFocusLineIndex),          \
-        .right = currentWindowRect.right                    \
-            - currentWindowRect.left                        \
-            + ES_LAYOUT_LINECOUNT_WIDTH,                    \
+        .right = editorWidth,                               \
         .bottom = ES_LAYOUT_LINECOUNT_FONT_HEIGHT           \
             *(editorState.relativeFocusLineIndex + 1)}
     
@@ -97,6 +97,13 @@ LRESULT editorProcedure(HWND hWindow,
             titlebarHeight = GetSystemMetrics(SM_CYFRAME)
                 + GetSystemMetrics(SM_CYCAPTION) 
                 + GetSystemMetrics(SM_CXPADDEDBORDER);
+            
+            if (loadFileIntoEditorState("test.txt", &editorState)
+                    != ES_ERROR_SUCCESS) {
+                PANIC("The file to edit does not exist.");
+                
+            }
+            
             break;
         }
         
@@ -151,70 +158,15 @@ LRESULT editorProcedure(HWND hWindow,
             highlightRect.bottom = ES_LAYOUT_LINECOUNT_FONT_HEIGHT
                 *(editorState.relativeFocusLineIndex+1);
             FillRect(hViewportDC, &highlightRect, hLineHighlightBrush);
+            InvalidateRect(hWindow, NULL, FALSE);
             
-            break;
-        }
-        
-        case WM_KEYDOWN: {
-            
-            #include "memory_manager.h"
-            
-            if (wParam == 'A') {
-                unsigned long visibleLineIndex;
-                int successCode;
-                PAINTSTRUCT ps;
-                RECT textDrawingRect;
-                HDC hCanvas;
-                
-                if (loadFileIntoEditorState("test.txt", &editorState)
-                        != ES_ERROR_SUCCESS) {
-                    return ES_ERROR_FILE_NOT_FOUND;
-                    
-                }
-                
-                textDrawingRect.left = ES_LAYOUT_LINECOUNT_WIDTH;
-                textDrawingRect.top = 0;
-                textDrawingRect.right = currentWindowRect.right
-                    - currentWindowRect.left;
-                textDrawingRect.bottom = currentWindowRect.bottom
-                    - currentWindowRect.top;
-                hCanvas = BeginPaint(hWindow, &ps);
-                
-                SelectObject(ps.hdc, hMonospaceFont);
-                SetTextColor(hCanvas, ES_COLOR_WHITE);
-                SetBkMode(hCanvas, TRANSPARENT);
-                
-                
-                
-                // for (visibleLineIndex = 0; 
-                        // visibleLineIndex < editorState.lines;
-                        // ++visibleLineIndex) {
-                    
-                    // char *line = editorState.ppCharData[visibleLineIndex
-                        // + editorState.firstVisibleLineIndex];
-                    
-                    // successCode = DrawText(hCanvas, line, -1,
-                        // &textDrawingRect, DT_SINGLELINE|DT_NOCLIP);
-                        
-                    // if (successCode == 0) {
-                        // PANIC("The renderer failed to render the contents of "
-                            // "the file subject to editing.");
-                        
-                    // }
-                // }
-                
-                EndPaint(hWindow, &ps);
-                ReleaseDC(hWindow, hCanvas);
-            }
             break;
         }
         
         case WM_PAINT: {
             
             // Storage for layouts in the rendering process.
-            static PAINTSTRUCT ps;                
-            unsigned int editorHeight = currentWindowRect.bottom
-                - currentWindowRect.top - titlebarHeight;
+            static PAINTSTRUCT ps;
             RECT lineCounterRect = {
                 .left = 0, 
                 .top = 0, 
@@ -222,11 +174,17 @@ LRESULT editorProcedure(HWND hWindow,
                 .bottom = editorHeight};
             RECT lineHighlightRect = 
                 INITIALIZE_TO_LASTEST_HIGHLIGHT_RECTANGLE();
+            RECT codeLineRect = {
+                .left = ES_LAYOUT_LINECOUNT_WIDTH,
+                .top = 0,
+                .right = editorWidth,
+                .bottom = editorHeight};
             
             // Storage for text line counts.
-            const unsigned int lines = editorHeight 
+            const unsigned int visibleLines = editorHeight 
                 / ES_LAYOUT_LINECOUNT_FONT_HEIGHT;
             unsigned long lineIndex;
+            sLineNode *pNode = editorState.dequeArr->pHead;
             
             // Storage for local renderer references.
             HDC hCanvas = BeginPaint(hWindow, &ps);
@@ -244,7 +202,6 @@ LRESULT editorProcedure(HWND hWindow,
             FillRect(hViewportDC, &lineHighlightRect, hLineHighlightBrush);
             
             
-            
             // Render line counter text on the line counter.
             
             
@@ -252,28 +209,35 @@ LRESULT editorProcedure(HWND hWindow,
             SetTextColor(hCanvas, ES_COLOR_WHITE);
             SetBkMode(hCanvas, TRANSPARENT);
             lineCounterRect.left = 8;
-            for (lineIndex = 0; lineIndex++ < lines;) {
-                char lineNumberTextBuffer[20]; // Assume 64-bit int.
+            for (lineIndex = 0; lineIndex++ < visibleLines;) {
+                char lineNumberTextBuffer[21]; // Assume 64-bit int.
                 int successCode;
                 
+                // Calls to the `sprintf` function automatically 
+                // inserts a null terminator character.
                 sprintf(lineNumberTextBuffer, "%ld", 
                     editorState.firstVisibleLineIndex+lineIndex);
+                
+                // Draw the line counter's text line.
                 successCode = DrawText(hCanvas, lineNumberTextBuffer, -1,
                     &lineCounterRect, DT_SINGLELINE|DT_NOCLIP);
                 
+                // Draw the code line.
+                if (pNode != NULL) {
+                    successCode = successCode
+                        && DrawText(hCanvas, pNode->line.pStart, -1,
+                        &codeLineRect, DT_SINGLELINE|DT_NOCLIP|DT_NOPREFIX);
+                    pNode = pNode->pNext;
+                    
+                }
                 if (successCode == 0) {
                     PANIC("The renderer failed to generate text.");
                     
                 }
                 
                 lineCounterRect.top += ES_LAYOUT_LINECOUNT_FONT_HEIGHT;
+                codeLineRect.top += ES_LAYOUT_LINECOUNT_FONT_HEIGHT;
             }
-            
-            /*XXX: Remove debug line count tracker.*/
-            printf("Number of lines: %i\n", lines);
-            printf("Current window coordinates: %li %li %li %li\n", 
-                currentWindowRect.top, currentWindowRect.left,
-                currentWindowRect.bottom, currentWindowRect.right);
             
             EndPaint(hWindow, &ps);
             ReleaseDC(hWindow, hCanvas);
@@ -293,6 +257,9 @@ LRESULT editorProcedure(HWND hWindow,
             // Update the rectangle for the window whenever the user 
             // resizes the window.
             GetWindowRect(hWindow, &currentWindowRect);
+            editorWidth = currentWindowRect.right - currentWindowRect.left;
+            editorHeight = currentWindowRect.bottom - currentWindowRect.top
+                - titlebarHeight;
             break;
         }
         

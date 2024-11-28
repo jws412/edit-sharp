@@ -9,12 +9,13 @@
 // the buffer must include these characters to properly detect them. 
 // An additional character is necessary to consider the null character.
 #define BUFFER_CHARACTERS 82
+#define TRUE 1
+#define FALSE 0
 
-#define ARRAY_SIZE(arr) (sizeof(arr)/sizeof((arr)[0]))
+#define ARRAY_CHARS(arr) (sizeof(arr)/sizeof(char))
 #define SALLOC(s) (malloc(sizeof(s)))
 
-sLineNode *constructLineNode(const unsigned int characters, 
-    const char *pBuffer);
+sLineNode *constructLineNode(unsigned int characters);
 void appendNodeToDeque(sLineNode *pNode, sLineDeque *pDeque);
 
 // Debug functions
@@ -28,7 +29,7 @@ enum EsError loadFileIntoEditorState(const char *pFilepath,
     sLineDeque *pFileLineDeque;                 // Line deque of file.
     HANDLE hFile;                               // Handle to file.
     unsigned long int outputCharacters;         // Characters to read.
-    unsigned int files;                         // Open file amount.
+    unsigned long int files = 0;                // Open file amount.
     
     // Remember to call the `CloseHandle` function to close the file.
     hFile = CreateFile(pFilepath, 
@@ -46,18 +47,10 @@ enum EsError loadFileIntoEditorState(const char *pFilepath,
     
     /*XXX: Consider the case that a file is already open.*/
     // Add a deque.
-    for (const sLineDeque *pDeque = pEditorState->dequeArr;
-            pDeque != NULL; 
-            ++pDeque, ++files);
-    pEditorState->dequeArr = realloc(pEditorState->dequeArr, 
-        (files+1 /*Consider null-terminator pointer.*/)*sizeof(sLineDeque));
-    if (pEditorState->dequeArr == NULL) {
-        return ES_ERROR_ALLOCATION_FAIL;
-        
-    }
+    pEditorState->dequeArr = SALLOC(sLineDeque);
     
     // Initialize the deque specific to the open file.
-    pFileLineDeque = &(pEditorState->dequeArr[files-1]);
+    pFileLineDeque = pEditorState->dequeArr;
     pFileLineDeque->lines = 0;
     pFileLineDeque->hFile = hFile;
     pFileLineDeque->pTail = pFileLineDeque->pHead = NULL;
@@ -65,7 +58,7 @@ enum EsError loadFileIntoEditorState(const char *pFilepath,
     // Prepare the buffer that stores file contents across iterations
     // searching for carriage return characters.
     dynamicBuffer.characters = 0;
-    dynamicBuffer.pStart = malloc(sizeof(char));
+    dynamicBuffer.pStart = malloc(1*sizeof(char));
     dynamicBuffer.pStart[0] = '\0';
     
     // Read lines from the open file.
@@ -73,44 +66,59 @@ enum EsError loadFileIntoEditorState(const char *pFilepath,
         unsigned int characterIndex, beginningIndex, lineCharacters;
         
         if (!ReadFile(hFile, buffer, 
-                ARRAY_SIZE(buffer)-1 /*Ignore null terminator*/, 
+                ARRAY_CHARS(buffer)-1 /*Ignore null terminator*/, 
                 &outputCharacters, 
                 NULL)) {
             return ES_ERROR_PARSING_ERROR;
             
         }
         
-        printf("Read %li bytes\n", outputCharacters);
-        
-        for (characterIndex = 0, beginningIndex = 0; 
-                characterIndex < outputCharacters; 
-                characterIndex += 2 /*Skip the CR+LF*/) {
-            
+        // The CR+LF may be across two subsequent iterations. 
+        // It is important to skip the line feed character in this 
+        // case.
+        characterIndex = beginningIndex = buffer[0] == '\n';
+        do {
             sLineNode *pNode;
             
             for (lineCharacters = 0; 
-                    buffer[characterIndex] != '\r' 
-                    && buffer[characterIndex] != '\0'
+                    buffer[characterIndex] != '\r'
                     && characterIndex < outputCharacters;
                     ++characterIndex, ++lineCharacters);
             
-            
-            if (buffer[characterIndex] == '\0') {
+            if (characterIndex >= outputCharacters) {
+                unsigned int biggerStrCharacters = dynamicBuffer.characters 
+                    + lineCharacters;
+                unsigned int remainerSegmentIndex = ARRAY_CHARS(buffer) 
+                    - lineCharacters - 1;
                 
                 // The function reached the end of the buffer without
                 // seeing any carriage return.
-                dynamicBuffer.characters += lineCharacters;
-                printf("Added %i characters.\n", lineCharacters);
+                
                 dynamicBuffer.pStart = realloc(dynamicBuffer.pStart, 
-                    sizeof(char)*dynamicBuffer.characters);
-                memcpy(dynamicBuffer.pStart, buffer, 
-                    sizeof(char)*dynamicBuffer.characters);
+                    sizeof(char)*(biggerStrCharacters + 1 /*Null*/));
+                if (dynamicBuffer.pStart == NULL) {
+                    return ES_ERROR_ALLOCATION_FAIL;
+                    
+                }
                 
-                // Read another chunk of data from the input file.
-                break;
+                memcpy(dynamicBuffer.pStart+dynamicBuffer.characters, 
+                    buffer+remainerSegmentIndex, lineCharacters);
                 
+                // Read another chunk of data from the input file if 
+                // not the last line.
+                if (outputCharacters == ARRAY_CHARS(buffer)
+                        - 1 /*Ignore null terminator.*/) {
+                    
+                    // Only update the number of characters when not 
+                    // at the last line. There are no more characters 
+                    // to expect after the last line.
+                    dynamicBuffer.characters = biggerStrCharacters;
+                    break;
+                    
+                }
+                
+                // Otherwise, no other characters are present.
             }
-            
             
             // Otherwise, the parser found a carriage return character.
             // The dynamic buffer can remain at its last size.
@@ -118,12 +126,27 @@ enum EsError loadFileIntoEditorState(const char *pFilepath,
             // buffer to read data from. A dynamic buffer size of zero
             // can hint to not read from it.
             if (dynamicBuffer.characters == 0) {
-                pNode = constructLineNode(lineCharacters, 
-                    buffer+beginningIndex /*Start at the substring*/);
+                
+                pNode = constructLineNode(lineCharacters);
+                
+                // Initialize the line that the node points to.
+                memcpy(pNode->line.pStart, 
+                    buffer+beginningIndex /*Start at the substring*/, 
+                    sizeof(char)*lineCharacters);
                 
             } else {
-                pNode = constructLineNode(dynamicBuffer.characters, 
-                    dynamicBuffer.pStart);
+                // A line exceeding the capacity of the buffer 
+                // requires a special initialization procedure.
+                
+                pNode = constructLineNode(dynamicBuffer.characters
+                    + lineCharacters /*Plus the buffer's line.*/);
+                
+                memcpy(pNode->line.pStart,
+                    dynamicBuffer.pStart,
+                    sizeof(char)*dynamicBuffer.characters);                
+                memcpy(pNode->line.pStart+dynamicBuffer.characters,
+                    buffer,
+                    sizeof(char)*lineCharacters);
                 
                 // Hint for the next iteration to not read from the
                 // dynamic buffer.
@@ -140,12 +163,9 @@ enum EsError loadFileIntoEditorState(const char *pFilepath,
             // additional characters are necessary to consider the 
             // carriage return and line feed.
             beginningIndex += lineCharacters+2;
-        }
-        
-        printf("%s", buffer);
-        
-    } while (outputCharacters 
-            == ARRAY_SIZE(buffer)-1 /*Ignore null terminator*/);
+            characterIndex += 2; /*Skip the CR+LF*/
+        } while (characterIndex < outputCharacters);
+    } while (outputCharacters != 0);
     
     free(dynamicBuffer.pStart);
     
@@ -154,8 +174,7 @@ enum EsError loadFileIntoEditorState(const char *pFilepath,
     return ES_ERROR_SUCCESS;
 }
 
-sLineNode *constructLineNode(const unsigned int characters, 
-        const char *pBuffer) {
+sLineNode *constructLineNode(unsigned int characters) {
     
     // Allocate memory for node
     sLineNode *pNode = SALLOC(sLineNode);
@@ -172,14 +191,8 @@ sLineNode *constructLineNode(const unsigned int characters,
     }
     pNode->line.characters = characters;
     
-    // The memory copy may not read all characters in the buffer. This 
-    // situation arises when the buffer holds multiple lines.
-    memcpy(pNode->line.pStart, pBuffer, sizeof(char)*characters);
-    
     // Add null-terminating character.
     pNode->line.pStart[characters] = '\0';
-    
-    printf("Added new node: %i %s\n", characters, pNode->line.pStart);
     
     return pNode;
 }
@@ -208,22 +221,16 @@ void appendNodeToDeque(sLineNode *pAddition, sLineDeque *pDeque) {
     
     ++(pDeque->lines);
     
-    printf("Current appearance: ");
-    printDeque(pDeque);
-    
     return;
 }
 
+
 void printDeque(sLineDeque *pDeque) {
     sLineNode *pNode = pDeque->pHead;
-    
-    
     while (pNode != NULL) {
-        printf("Node: \"%s\" -> ", pNode->line.pStart);
-        
+        printf("%s\n", pNode->line.pStart);
         pNode = pNode->pNext;
-        
     }
     puts("X");
-    
+    return;
 }
