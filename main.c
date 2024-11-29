@@ -6,7 +6,7 @@ LRESULT editorProcedure(HWND windowHandle, unsigned int messageId,
     WPARAM primary, LPARAM secondary);
 
 int main(void) {
-    HWND hEditor = initEditor(&editorProcedure);
+    HWND hEditor = initEditor(&editorProcedure); // Calls the initialization function of initEditor() from init.h which create the GUI of the text editor
     
     if (hEditor == NULL) {
         PANIC("Failed to initialize Edit#.");
@@ -27,7 +27,7 @@ int main(void) {
 
 void jumpHead(sEditorState *pState, const RECT *pRefreshRectangle);
 
-LRESULT editorProcedure(HWND hWindow,
+LRESULT editorProcedure(HWND hWindow, // Method that processes messages sent by the editor's windows to establish properties like brushes, fonts, colors, etc.
         unsigned int messageId,
         WPARAM wParam,
         LPARAM lParam) {
@@ -45,9 +45,9 @@ LRESULT editorProcedure(HWND hWindow,
     static RECT currentWindowRect = { 0 };      // Current window size.
     static sEditorState editorState = { 0 };    // System to change.
     
-    switch(messageId) {
+    switch(messageId) { // Different use cases based on the received messaged by the editor
         
-        case WM_CREATE: {
+        case WM_CREATE: { // Initialize resources needed for the editor (font, brushes, etc.)
             
             // Fetch the device context of the editor's window.
             hEditorDC = GetWindowDC(hWindow);
@@ -105,11 +105,12 @@ LRESULT editorProcedure(HWND hWindow,
         }
         
         // Take care of drawing the background of the text editor.
-        case WM_CTLCOLORSTATIC: {
+        case WM_CTLCOLORSTATIC: { 
             SetBkColor(hEditorDC, ES_COLOR_BACKGROUND);
             return (LRESULT) hBackgroundBrush;
         }
         
+        // Cleans up resources when the editor is closed to free up memory
         case WM_DESTROY: {
             ReleaseDC(hWindow, hEditorDC);
             ReleaseDC(hWindow, hViewportDC);
@@ -127,6 +128,7 @@ LRESULT editorProcedure(HWND hWindow,
             break;
         }
         
+        // Updates DPI based on the display the program is ran on
         case WM_DPICHANGED: {
             if (updateAccordingToDpi(hWindow, &currentWindowRect) 
                     != ES_ERROR_SUCCESS) {
@@ -136,6 +138,7 @@ LRESULT editorProcedure(HWND hWindow,
             break;
         }
         
+        // Handles keyboard inputs from the user
         case WM_KEYDOWN: {
             
             RECT refreshRectangle = {
@@ -209,6 +212,7 @@ LRESULT editorProcedure(HWND hWindow,
             break;
         }
         
+        // Handles left mouse click actions from the user
         case WM_LBUTTONDOWN: {
             
             #include "input_handler.h"
@@ -224,6 +228,7 @@ LRESULT editorProcedure(HWND hWindow,
             break;
         }
         
+        // Renders the content in the editor
         case WM_PAINT: {
             // Storage for layouts in the rendering process.
             static PAINTSTRUCT ps;
@@ -321,6 +326,7 @@ LRESULT editorProcedure(HWND hWindow,
             break;
         }
         
+        // Handles the dimensions of the window when its being resized (scaling)
         case WM_SIZE: {
             
             // Update the rectangle for the window whenever the user 
@@ -341,6 +347,9 @@ LRESULT editorProcedure(HWND hWindow,
     return ERROR_SUCCESS;
 }
 
+// Move from line to line in the editor based on the highlighted section of the editor by determining the position of the double linked list
+// if we want to go up 1 line, it will read the next index of the double linked list
+// else we want to go down 1 line, it will read the previous index of the double linked list
 void jumpHead(sEditorState *pState, const RECT *pRefreshRectangle) {
     
     sLineNode *pNode = pState->pActiveHead->pNode;
