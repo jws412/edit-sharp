@@ -15,7 +15,6 @@
 #define ARRAY_CHARS(arr) (sizeof(arr)/sizeof(char))
 #define SALLOC(s) (malloc(sizeof(s)))
 
-sLineNode *constructLineNode(unsigned int characters);
 void appendNodeToDeque(sLineNode *pNode, sLineDeque *pDeque);
 
 // Debug functions
@@ -168,8 +167,6 @@ enum EsError loadFileIntoEditorState(const char *pFilepath,
     } while (outputCharacters != 0);
     
     free(dynamicBuffer.pStart);
-    
-    printDeque(pFileLineDeque);
     
     return ES_ERROR_SUCCESS;
 }
