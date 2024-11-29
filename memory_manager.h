@@ -18,6 +18,7 @@ typedef struct LineDeque {
     HANDLE hFile;
     sLineNode *pHead;
     sLineNode *pTail;
+    sWriteHead writeHead;
 } sLineDeque;
 
 enum EsError loadFileIntoEditorState(const char *pFilepath, 

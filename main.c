@@ -25,6 +25,8 @@ int main(void) {
 #include "memory_manager.h"
 #include "dpi_manager.h"
 
+void jumpHead(sEditorState *pState, const RECT *pRefreshRectangle);
+
 LRESULT editorProcedure(HWND hWindow,
         unsigned int messageId,
         WPARAM wParam,
@@ -42,7 +44,6 @@ LRESULT editorProcedure(HWND hWindow,
     static unsigned short editorWidth = 0, editorHeight = 0;
     static RECT currentWindowRect = { 0 };      // Current window size.
     static sEditorState editorState = { 0 };    // System to change.
-    static sLineNode *pWriteHead = NULL;
     
     switch(messageId) {
         
@@ -97,8 +98,8 @@ LRESULT editorProcedure(HWND hWindow,
                 
             }
             
-            /*Consider multiple open files.*/
-            pWriteHead = editorState.dequeArr[0].pHead;
+            /*XXX: Consider multiple open files.*/
+            editorState.pActiveHead = &(editorState.dequeArr[0].writeHead);
             
             break;
         }
@@ -136,24 +137,27 @@ LRESULT editorProcedure(HWND hWindow,
         }
         
         case WM_KEYDOWN: {
+            
+            RECT refreshRectangle = {
+                .left = ES_LAYOUT_LINECOUNT_WIDTH,
+                .top = editorState.curHighlight.top,
+                .right = editorWidth,
+                .bottom = editorHeight};
+            
             switch(wParam) {
                 
                 case VK_RETURN: {
-                    sLineNode *pBehind = pWriteHead->pNext;
+                    sLineNode *pBehind = 
+                        editorState.pActiveHead->pNode->pNext;
                     sLineNode *pAddition = constructLineNode(0);
-                    RECT refreshRectangle = {
-                        .left = ES_LAYOUT_LINECOUNT_WIDTH,
-                        .top = editorState.curHighlight.top,
-                        .right = editorWidth,
-                        .bottom = editorHeight};
                     
-                    pAddition->pPrev = pWriteHead;
+                    pAddition->pPrev = editorState.pActiveHead->pNode;
                     pAddition->pNext = pBehind;
                     
-                    pWriteHead->pNext = pAddition;
+                    editorState.pActiveHead->pNode->pNext = pAddition;
                     pBehind->pPrev = pAddition;
                     
-                    pWriteHead = pAddition;
+                    editorState.pActiveHead->pNode = pAddition;
                     
                     ++editorState.prevHighlight.relativeFocusLineIndex;
                     editorState.prevHighlight.top += 
@@ -162,12 +166,46 @@ LRESULT editorProcedure(HWND hWindow,
                     editorState.curHighlight.top += 
                         ES_LAYOUT_LINECOUNT_FONT_HEIGHT;
                     
-                    InvalidateRect(hWindow, &refreshRectangle, TRUE);
+                    break;
+                }
+                
+                case VK_BACK: {
+                    
+                    if (editorState.pActiveHead->pNode->line.characters==0
+                            && editorState.pActiveHead->pNode->pPrev!=NULL) {
+                        
+                        sLineNode *pTarget = editorState.pActiveHead->pNode;
+                        sLineNode *pOtherEnd = pTarget->pNext;
+                        
+                        // Move the node that the write head points to back
+                        // one line.
+                        editorState.pActiveHead->pNode = 
+                            editorState.pActiveHead->pNode->pPrev;
+                        
+                        editorState.pActiveHead->pNode->pNext = pOtherEnd;
+                        pOtherEnd->pPrev = editorState.pActiveHead->pNode;
+                        
+                        free(pTarget);
+                        
+                        editorState.prevHighlight.relativeFocusLineIndex
+                            = editorState.curHighlight.relativeFocusLineIndex;
+                        editorState.prevHighlight.top = 
+                            editorState.curHighlight.top;
+                        
+                        refreshRectangle.top -= 
+                            ES_LAYOUT_LINECOUNT_FONT_HEIGHT;
+                        editorState.curHighlight.top -= 
+                            ES_LAYOUT_LINECOUNT_FONT_HEIGHT;
+                        --editorState.curHighlight.relativeFocusLineIndex;
+                        
+                    }
+                    
                     break;
                 }
                 
             }
             
+            InvalidateRect(hWindow, &refreshRectangle, TRUE);
             break;
         }
         
@@ -176,40 +214,12 @@ LRESULT editorProcedure(HWND hWindow,
             #include "input_handler.h"
             
             RECT refreshRectangle;
-            signed char jumps;
             
             // The `lParam` parameter describes the position of the 
             // user's cursor.
-            updateStateAccordingToClick(&editorState, lParam);
-            
-            refreshRectangle.left = ES_LAYOUT_LINECOUNT_WIDTH;
-            refreshRectangle.right = editorWidth;
-            
-            if (editorState.curHighlight.top 
-                    > editorState.prevHighlight.top) {
-                
-                refreshRectangle.top = editorState.prevHighlight.top;
-                refreshRectangle.bottom = editorState.curHighlight.top
-                    + ES_LAYOUT_LINECOUNT_FONT_HEIGHT;
-                    
-            } else {
-                refreshRectangle.top = editorState.curHighlight.top;
-                refreshRectangle.bottom = editorState.prevHighlight.top
-                    + ES_LAYOUT_LINECOUNT_FONT_HEIGHT;
-                
-            }
-            
-            jumps = editorState.curHighlight.relativeFocusLineIndex
-                - editorState.prevHighlight.relativeFocusLineIndex;
-            
-            if (jumps > 0) {
-                while (jumps--) pWriteHead = pWriteHead->pNext;
-                
-            } else {
-                while (jumps++) pWriteHead = pWriteHead->pPrev;
-                
-            }
-            
+            refreshRectangle = updateStateAccordingToClick(&editorState, 
+                editorWidth, lParam);
+            jumpHead(&editorState, &refreshRectangle);
             InvalidateRect(hWindow, &refreshRectangle, FALSE);
             break;
         }
@@ -288,8 +298,9 @@ LRESULT editorProcedure(HWND hWindow,
                 // Draw the code line.
                 if (pNode != NULL) {
                     successCode = successCode
-                        && DrawText(hCanvas, pNode->line.pStart, -1,
-                        &codeLineRect, DT_SINGLELINE|DT_NOCLIP|DT_NOPREFIX);
+                        && DrawText(hCanvas, pNode->line.pStart, 
+                        pNode->line.characters+1, &codeLineRect, 
+                        DT_SINGLELINE|DT_NOCLIP|DT_NOPREFIX);
                     pNode = pNode->pNext;
                     
                 }
@@ -328,4 +339,35 @@ LRESULT editorProcedure(HWND hWindow,
     }
     
     return ERROR_SUCCESS;
+}
+
+void jumpHead(sEditorState *pState, const RECT *pRefreshRectangle) {
+    
+    sLineNode *pNode = pState->pActiveHead->pNode;
+    
+    if (pState->curHighlight.relativeFocusLineIndex 
+            > pState->prevHighlight.relativeFocusLineIndex) {
+    
+        long int top = pRefreshRectangle->top;
+        
+        while ((top += ES_LAYOUT_LINECOUNT_FONT_HEIGHT)
+                != pRefreshRectangle->bottom && pNode->pNext != NULL) {
+            
+            pNode = pNode->pNext;
+        }
+        
+    } else {
+        
+        long int bottom = pRefreshRectangle->bottom;
+        
+        while ((bottom -= ES_LAYOUT_LINECOUNT_FONT_HEIGHT)
+                != pRefreshRectangle->top && pNode->pPrev != NULL) {
+            
+            pNode = pNode->pPrev;
+        }
+        
+    }
+    
+    pState->pActiveHead->pNode = pNode;
+    return;
 }

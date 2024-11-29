@@ -25,7 +25,7 @@ enum EsError loadFileIntoEditorState(const char *pFilepath,
     
     char buffer[BUFFER_CHARACTERS] = { 0 };     // Buffer for file.
     sLine dynamicBuffer;                        // Persistent buffer.
-    sLineDeque *pFileLineDeque;                 // Line deque of file.
+    sLineDeque *pDeque;                         // Line deque of file.
     HANDLE hFile;                               // Handle to file.
     unsigned long int outputCharacters;         // Characters to read.
     unsigned long int files = 0;                // Open file amount.
@@ -49,10 +49,10 @@ enum EsError loadFileIntoEditorState(const char *pFilepath,
     pEditorState->dequeArr = SALLOC(sLineDeque);
     
     // Initialize the deque specific to the open file.
-    pFileLineDeque = pEditorState->dequeArr;
-    pFileLineDeque->lines = 0;
-    pFileLineDeque->hFile = hFile;
-    pFileLineDeque->pTail = pFileLineDeque->pHead = NULL;
+    pDeque = pEditorState->dequeArr;
+    pDeque->lines = 0;
+    pDeque->hFile = hFile;
+    pDeque->pTail = pDeque->pHead = NULL;
     
     // Prepare the buffer that stores file contents across iterations
     // searching for carriage return characters.
@@ -116,7 +116,8 @@ enum EsError loadFileIntoEditorState(const char *pFilepath,
                     
                 }
                 
-                // Otherwise, no other characters are present.
+                // Otherwise, no more characters are present.
+                
             }
             
             // Otherwise, the parser found a carriage return character.
@@ -154,7 +155,7 @@ enum EsError loadFileIntoEditorState(const char *pFilepath,
             }
             
             // Append the node to the line deque.
-            appendNodeToDeque(pNode, pFileLineDeque);
+            appendNodeToDeque(pNode, pDeque);
             
             // Prepare the index in the buffer delimiting the start of 
             // the next line. This index is only useful for reading 
@@ -167,6 +168,11 @@ enum EsError loadFileIntoEditorState(const char *pFilepath,
     } while (outputCharacters != 0);
     
     free(dynamicBuffer.pStart);
+    
+    // Set the head node of the deque as the initial line subject to
+    // edits.
+    pDeque->writeHead.pNode = pDeque->pHead;
+    pDeque->writeHead.index = 0;
     
     return ES_ERROR_SUCCESS;
 }

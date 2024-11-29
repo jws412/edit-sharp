@@ -26,13 +26,19 @@ enum EsError {
     ES_ERROR_ALLOCATION_FAIL,
 };
 
+typedef struct WriteHead {
+    struct LineNode *pNode;
+    unsigned int index;
+} sWriteHead;
+
 typedef struct {
+    struct LineDeque *dequeArr;
+    sWriteHead *pActiveHead;
     unsigned long firstVisibleLineIndex;
     struct {
         unsigned short relativeFocusLineIndex;
         unsigned short top;
     } prevHighlight, curHighlight;
-    struct LineDeque *dequeArr;
 } sEditorState;
 
 #define _HEADER_GLOBAL_DATA
