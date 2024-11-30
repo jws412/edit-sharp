@@ -15,6 +15,8 @@
 #define ES_COLOR_HIGHLIGHT RGB(25,30,45)
 #define ES_COLOR_WHITE RGB(255,255,255)
 
+#define ES_SCROLL_NUMBNESS 17
+
 #define PANIC(message) (MessageBox(NULL, message, NULL, MB_OK), PostQuitMessage(0), (void) 0)
 
 enum EsError {
@@ -28,7 +30,8 @@ enum EsError {
 
 typedef struct WriteHead {
     struct LineNode *pNode;
-    unsigned int index;
+    unsigned long lineIndex;
+    unsigned int characterIndex;
 } sWriteHead;
 
 typedef struct {

@@ -6,7 +6,7 @@ LRESULT editorProcedure(HWND windowHandle, unsigned int messageId,
     WPARAM primary, LPARAM secondary);
 
 int main(void) {
-    HWND hEditor = initEditor(&editorProcedure); // Calls the initialization function of initEditor() from init.h which create the GUI of the text editor
+    HWND hEditor = initEditor(&editorProcedure);
     
     if (hEditor == NULL) {
         PANIC("Failed to initialize Edit#.");
@@ -25,9 +25,12 @@ int main(void) {
 #include "memory_manager.h"
 #include "dpi_manager.h"
 
+RECT updateHighlight(sEditorState* pEditorState,
+        const unsigned short windowWidth,
+        const unsigned short curRelativeIndex);
 void jumpHead(sEditorState *pState, const RECT *pRefreshRectangle);
 
-LRESULT editorProcedure(HWND hWindow, // Method that processes messages sent by the editor's windows to establish properties like brushes, fonts, colors, etc.
+LRESULT editorProcedure(HWND hWindow,
         unsigned int messageId,
         WPARAM wParam,
         LPARAM lParam) {
@@ -45,9 +48,9 @@ LRESULT editorProcedure(HWND hWindow, // Method that processes messages sent by 
     static RECT currentWindowRect = { 0 };      // Current window size.
     static sEditorState editorState = { 0 };    // System to change.
     
-    switch(messageId) { // Different use cases based on the received messaged by the editor
+    switch(messageId) {
         
-        case WM_CREATE: { // Initialize resources needed for the editor (font, brushes, etc.)
+        case WM_CREATE: {
             
             // Fetch the device context of the editor's window.
             hEditorDC = GetWindowDC(hWindow);
@@ -105,12 +108,11 @@ LRESULT editorProcedure(HWND hWindow, // Method that processes messages sent by 
         }
         
         // Take care of drawing the background of the text editor.
-        case WM_CTLCOLORSTATIC: { 
+        case WM_CTLCOLORSTATIC: {
             SetBkColor(hEditorDC, ES_COLOR_BACKGROUND);
             return (LRESULT) hBackgroundBrush;
         }
         
-        // Cleans up resources when the editor is closed to free up memory
         case WM_DESTROY: {
             ReleaseDC(hWindow, hEditorDC);
             ReleaseDC(hWindow, hViewportDC);
@@ -128,7 +130,6 @@ LRESULT editorProcedure(HWND hWindow, // Method that processes messages sent by 
             break;
         }
         
-        // Updates DPI based on the display the program is ran on
         case WM_DPICHANGED: {
             if (updateAccordingToDpi(hWindow, &currentWindowRect) 
                     != ES_ERROR_SUCCESS) {
@@ -138,14 +139,9 @@ LRESULT editorProcedure(HWND hWindow, // Method that processes messages sent by 
             break;
         }
         
-        // Handles keyboard inputs from the user
         case WM_KEYDOWN: {
             
-            RECT refreshRectangle = {
-                .left = ES_LAYOUT_LINECOUNT_WIDTH,
-                .top = editorState.curHighlight.top,
-                .right = editorWidth,
-                .bottom = editorHeight};
+            RECT refreshRectangle;
             
             switch(wParam) {
                 
@@ -162,15 +158,14 @@ LRESULT editorProcedure(HWND hWindow, // Method that processes messages sent by 
                     
                     editorState.pActiveHead->pNode = pAddition;
                     
-                    ++editorState.prevHighlight.relativeFocusLineIndex;
-                    editorState.prevHighlight.top += 
-                        ES_LAYOUT_LINECOUNT_FONT_HEIGHT;
-                    ++editorState.curHighlight.relativeFocusLineIndex;
-                    editorState.curHighlight.top += 
-                        ES_LAYOUT_LINECOUNT_FONT_HEIGHT;
+                    refreshRectangle = updateHighlight(&editorState, 
+                        editorWidth, 
+                        editorState.curHighlight.relativeFocusLineIndex+1);
+                    refreshRectangle.bottom = editorHeight;
                     
                     break;
                 }
+                
                 
                 case VK_BACK: {
                     
@@ -195,15 +190,48 @@ LRESULT editorProcedure(HWND hWindow, // Method that processes messages sent by 
                         editorState.prevHighlight.top = 
                             editorState.curHighlight.top;
                         
-                        refreshRectangle.top -= 
-                            ES_LAYOUT_LINECOUNT_FONT_HEIGHT;
-                        editorState.curHighlight.top -= 
-                            ES_LAYOUT_LINECOUNT_FONT_HEIGHT;
-                        --editorState.curHighlight.relativeFocusLineIndex;
+                        refreshRectangle = updateHighlight(&editorState, 
+                            editorWidth, 
+                            editorState.curHighlight.relativeFocusLineIndex
+                            - 1);
+                        refreshRectangle.bottom = editorHeight;
+                        
+                        break;
                         
                     }
                     
-                    break;
+                    // Short-cut to the end to avoid rendering.
+                    return ERROR_SUCCESS;
+                }
+                
+                case VK_UP: {
+                    
+                    if (editorState.pActiveHead->pNode->pPrev != NULL) {
+                        
+                        editorState.pActiveHead->pNode = 
+                            editorState.pActiveHead->pNode->pPrev;
+                        refreshRectangle = updateHighlight(&editorState, 
+                            editorWidth, 
+                            editorState.curHighlight.relativeFocusLineIndex
+                            - 1);
+                        break;
+                        
+                    }
+                    return ERROR_SUCCESS;
+                }
+                case VK_DOWN: {
+                    
+                    if (editorState.pActiveHead->pNode->pNext != NULL) {
+                        
+                        editorState.pActiveHead->pNode = 
+                            editorState.pActiveHead->pNode->pNext;
+                        refreshRectangle = updateHighlight(&editorState, 
+                            editorWidth, 
+                            editorState.curHighlight.relativeFocusLineIndex
+                            + 1);
+                        break;
+                    }
+                    return ERROR_SUCCESS;
                 }
                 
             }
@@ -212,26 +240,31 @@ LRESULT editorProcedure(HWND hWindow, // Method that processes messages sent by 
             break;
         }
         
-        // Handles left mouse click actions from the user
         case WM_LBUTTONDOWN: {
-            
-            #include "input_handler.h"
-            
-            RECT refreshRectangle;
             
             // The `lParam` parameter describes the position of the 
             // user's cursor.
-            refreshRectangle = updateStateAccordingToClick(&editorState, 
-                editorWidth, lParam);
+            const unsigned short clickX = (0xFFFF & lParam), 
+                clickY = (lParam >> 16);
+            const unsigned short lines = clickY
+                / ES_LAYOUT_LINECOUNT_FONT_HEIGHT;
+            RECT refreshRectangle;
+            
+            refreshRectangle = updateHighlight(&editorState, 
+                editorWidth, clickY/ES_LAYOUT_LINECOUNT_FONT_HEIGHT);
             jumpHead(&editorState, &refreshRectangle);
+            
+            editorState.pActiveHead->characterIndex = 
+                clickX >= ES_LAYOUT_LINECOUNT_WIDTH ?
+                clickX / ES_LAYOUT_LINECOUNT_FONT_WIDTH : 0;
+            
             InvalidateRect(hWindow, &refreshRectangle, FALSE);
             break;
         }
         
-        // Renders the content in the editor
         case WM_PAINT: {
             // Storage for layouts in the rendering process.
-            static PAINTSTRUCT ps;
+            PAINTSTRUCT ps;
             RECT lineCounterRect = {
                 .left = 0, 
                 .top = 0, 
@@ -246,7 +279,17 @@ LRESULT editorProcedure(HWND hWindow, // Method that processes messages sent by 
             // Storage for text line counts.
             const unsigned int visibleLines = editorHeight 
                 / ES_LAYOUT_LINECOUNT_FONT_HEIGHT;
-            const sLineNode *pNode = editorState.dequeArr->pHead;
+            const sLineNode *pNode = editorState.pActiveHead->pNode;
+            signed long jumps = editorState.pActiveHead->lineIndex
+                - editorState.firstVisibleLineIndex;
+            
+            if (jumps > 0) {
+                while (jumps--) pNode = pNode->pPrev;
+                
+            } else {
+                while (jumps++) pNode = pNode->pNext;
+                
+            }
             
             // Storage for local renderer references.
             HDC hCanvas = BeginPaint(hWindow, &ps);
@@ -326,7 +369,6 @@ LRESULT editorProcedure(HWND hWindow, // Method that processes messages sent by 
             break;
         }
         
-        // Handles the dimensions of the window when its being resized (scaling)
         case WM_SIZE: {
             
             // Update the rectangle for the window whenever the user 
@@ -339,6 +381,24 @@ LRESULT editorProcedure(HWND hWindow, // Method that processes messages sent by 
             break;
         }
         
+        case WM_MOUSEWHEEL: {
+            
+            const signed short jumps = -GET_WHEEL_DELTA_WPARAM(wParam)
+                / ES_SCROLL_NUMBNESS;
+            const signed long update = editorState.firstVisibleLineIndex
+                + jumps;
+            
+            /*XXX: Consider multiple files later on.*/
+            if (update>=0
+                    && update<(signed long)editorState.dequeArr[0].lines) {
+                editorState.firstVisibleLineIndex = update;
+            }
+            
+            InvalidateRect(hWindow, NULL, TRUE);
+            
+            break;
+        }
+        
         default: {
             return DefWindowProc(hWindow, messageId, wParam, lParam);
         }
@@ -347,9 +407,6 @@ LRESULT editorProcedure(HWND hWindow, // Method that processes messages sent by 
     return ERROR_SUCCESS;
 }
 
-// Move from line to line in the editor based on the highlighted section of the editor by determining the position of the double linked list
-// if we want to go up 1 line, it will read the next index of the double linked list
-// else we want to go down 1 line, it will read the previous index of the double linked list
 void jumpHead(sEditorState *pState, const RECT *pRefreshRectangle) {
     
     sLineNode *pNode = pState->pActiveHead->pNode;
@@ -379,4 +436,38 @@ void jumpHead(sEditorState *pState, const RECT *pRefreshRectangle) {
     
     pState->pActiveHead->pNode = pNode;
     return;
+}
+
+RECT updateHighlight(sEditorState* pEditorState,
+        const unsigned short windowWidth,
+        const unsigned short curRelativeIndex) {
+    
+    RECT refreshRectangle;
+    
+    pEditorState->prevHighlight = pEditorState->curHighlight;
+    pEditorState->curHighlight.relativeFocusLineIndex = curRelativeIndex;
+    pEditorState->curHighlight.top = ES_LAYOUT_LINECOUNT_FONT_HEIGHT
+        * pEditorState->curHighlight.relativeFocusLineIndex;
+    
+    refreshRectangle.left = ES_LAYOUT_LINECOUNT_WIDTH;
+    refreshRectangle.right = windowWidth;
+    if (pEditorState->curHighlight.top 
+            > pEditorState->prevHighlight.top) {
+        
+        refreshRectangle.top = pEditorState->prevHighlight.top;
+        refreshRectangle.bottom = pEditorState->curHighlight.top
+            + ES_LAYOUT_LINECOUNT_FONT_HEIGHT;
+            
+    } else {
+        refreshRectangle.top = pEditorState->curHighlight.top;
+        refreshRectangle.bottom = pEditorState->prevHighlight.top
+            + ES_LAYOUT_LINECOUNT_FONT_HEIGHT;
+        
+    }
+    
+    // Update the index for the write head.
+    pEditorState->pActiveHead->lineIndex += curRelativeIndex
+        - pEditorState->prevHighlight.relativeFocusLineIndex;
+    
+    return refreshRectangle;
 }

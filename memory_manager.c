@@ -20,7 +20,6 @@ void appendNodeToDeque(sLineNode *pNode, sLineDeque *pDeque);
 // Debug functions
 void printDeque(sLineDeque *pDeque);
 
-// Function that loads the file into the editor
 enum EsError loadFileIntoEditorState(const char *pFilepath, 
         sEditorState *pEditorState) {
     
@@ -173,13 +172,12 @@ enum EsError loadFileIntoEditorState(const char *pFilepath,
     // Set the head node of the deque as the initial line subject to
     // edits.
     pDeque->writeHead.pNode = pDeque->pHead;
-    pDeque->writeHead.index = 0;
+    pDeque->writeHead.characterIndex = 0;
+    pDeque->writeHead.lineIndex = 0;
     
     return ES_ERROR_SUCCESS;
 }
 
-// Uses a doubly linked list (deque) to store lines of a file, 
-// where each line is represented by a sLinenode that contains an SLine and pointers to previous and next nodes
 sLineNode *constructLineNode(unsigned int characters) {
     
     // Allocate memory for node
@@ -203,14 +201,12 @@ sLineNode *constructLineNode(unsigned int characters) {
     return pNode;
 }
 
-// Free up the memory of sLineNode after its done being used
 void destructLineNode(sLineNode *pNode) {
     free(pNode->line.pStart);
     free(pNode);
     return;
 }
 
-// Add node at the end of the Deque
 void appendNodeToDeque(sLineNode *pAddition, sLineDeque *pDeque) {
     sLineNode *pPenultimate = pDeque->pTail;
     
@@ -232,7 +228,7 @@ void appendNodeToDeque(sLineNode *pAddition, sLineDeque *pDeque) {
     return;
 }
 
-// print the text content on the editor
+
 void printDeque(sLineDeque *pDeque) {
     sLineNode *pNode = pDeque->pHead;
     while (pNode != NULL) {

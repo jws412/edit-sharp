@@ -1,15 +1,20 @@
 #include "dpi_manager.h"
 #include "init.h"
 
-HWND initEditor(LRESULT (*pProcedure)(HWND, unsigned int, WPARAM, LPARAM)) { // Initialize the Editor program based off the dpi_manager.c class used to create windows
-    const RECT initialWindowRect = {0, 0, 720, 540}; // Initialize window at 720 x 540 resolution
-    HMODULE hEditorModule; // imports a handler module for the .exe program
+// Initialize the Editor program based off the `dpi_manager.c` 
+// translation unit used to create windows.
+HWND initEditor(LRESULT (*pProcedure)(HWND, unsigned int, WPARAM, LPARAM)) {
+    const RECT initialWindowRect = {0, 0, 720, 540};
+    HMODULE hEditorModule;
     if (!GetModuleHandleEx(0, NULL, &hEditorModule)) {
         return NULL;
         
     }
     
-    WNDCLASSEX editorWindowClass = { // Registers the structure that defines the properties of the window class, there information can be found on the global_data.h file
+    // Registers the structure that defines the properties of the 
+    // window class, there information can be found on the 
+    // `global_data.h` file.
+    WNDCLASSEX editorWindowClass = {
         .cbSize = sizeof(WNDCLASSEX),
         .style = CS_HREDRAW|CS_VREDRAW,
         .lpfnWndProc = pProcedure,
@@ -28,7 +33,8 @@ HWND initEditor(LRESULT (*pProcedure)(HWND, unsigned int, WPARAM, LPARAM)) { // 
         
     }
     
-    HWND hEditorWindow = CreateWindowEx( // Create the window using the registered window class
+    // Create the window using the registered window class.
+    HWND hEditorWindow = CreateWindowEx(
         WS_EX_APPWINDOW,
         CLASS_NAME,
         HEADER_NAME,
@@ -46,7 +52,7 @@ HWND initEditor(LRESULT (*pProcedure)(HWND, unsigned int, WPARAM, LPARAM)) { // 
         return NULL;
         
     }
-    updateAccordingToDpi(hEditorWindow, &initialWindowRect); // Apply DPI settings to the window
+    updateAccordingToDpi(hEditorWindow, &initialWindowRect);
     
     return hEditorWindow;
 }
